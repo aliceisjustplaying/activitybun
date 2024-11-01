@@ -19,10 +19,13 @@ const key_public = process.env.KEY_PUBLIC!.replace('\n', '\n');
 const password = process.env.PASSWORD!;
 
 // Internal data
-const server = os.hostname(); // Do not change this!
+const serverHostName = os.hostname(); // Do not change this!
 
+const APP_NAME = 'activitybun-single-ts-file';
+const APP_VERSION = '0.0';
+const APP_DESCRIPTION = 'Single File ActivityPub Server in TypeScript';
 // Some requests require a User-Agent string.
-const USERAGENT = 'activitybun-single-ts-file/0.0';
+const USERAGENT = `${APP_NAME}/${APP_VERSION}`;
 
 // Set up where to save logs, posts, and images.
 // You can change these directories to something more suitable if you like.
@@ -45,9 +48,125 @@ for (const directory of Object.values(directories)) {
   }
 }
 
-// Get the information sent to this server
-// $input = file_get_contents('php://input');
-// $body = json_decode($input, true);
-// $bodyData = print_r($body, true);
+//	The WebFinger Protocol is used to identify accounts.
+//	It is requested with `example.com/.well-known/webfinger?resource=acct:username@example.com`
+//	This server only has one user, so it ignores the query string and always returns the same details.
+function webfinger() {
+  const webfinger = {
+    subject: `acct:${username}@${serverHostName}`,
+    links: [
+      {
+        rel: 'self',
+        type: 'application/activity+json',
+        href: `https://${serverHostName}/${username}`,
+      },
+    ],
+  };
 
+  return new Response(JSON.stringify(webfinger), {
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+}
 
+// The NodeInfo Protocol is used to identify servers.
+// It is looked up with `example.com/.well-known/nodeinfo`
+// See https://nodeinfo.diaspora.software/
+function wk_nodeinfo() {
+  const nodeinfo = {
+    links: [
+      {
+        rel: 'self',
+        type: 'http://nodeinfo.diaspora.software/ns/schema/2.1',
+        href: `https://${serverHostName}/nodeinfo/2.1`,
+      },
+    ],
+  };
+
+  return new Response(JSON.stringify(nodeinfo), {
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+}
+
+// The NodeInfo Protocol is used to identify servers.
+// It is looked up with `example.com/.well-known/nodeinfo` which points to this resource
+// See http://nodeinfo.diaspora.software/docson/index.html#/ns/schema/2.0#$$expand
+function nodeinfo() {
+  // Get all posts
+  const posts = fs.readdirSync(directories.posts).filter((file) => file.endsWith('.json'));
+  // Number of posts
+  const totalItems = posts.length;
+
+  const nodeinfo = {
+    version: '2.1', // Version of the schema, not the software
+    software: {
+      name: APP_DESCRIPTION,
+      version: APP_VERSION,
+      repository: 'https://github.com/aliceisjustplaying/ap.mosphere.at',
+    },
+    protocols: ['activitypub'],
+    services: {
+      inbound: [],
+      outbound: [],
+    },
+    openRegistrations: false,
+    usage: {
+      users: {
+        total: 1,
+      },
+      localPosts: totalItems,
+    },
+    metadata: {
+      nodeName: APP_NAME,
+      nodeDescription: 'This is a single TypeScript file which acts as an extremely basic ActivityPub server.',
+      spdx: 'AGPL-3.0-or-later',
+    },
+  };
+
+  return new Response(JSON.stringify(nodeinfo), {
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+}
+
+const server = Bun.serve({
+  port: 3003,
+  fetch(req, server) {
+    const path = new URL(req.url).pathname;
+    if (path === '/.well-known/webfinger') {
+      return webfinger(); //	Mandatory. Static.
+    } else if (path === '/.well-known/nodeinfo') {
+      return wk_nodeinfo(); //	Optional. Static.
+    } else if (path === '/nodeinfo/2.1') {
+      return nodeinfo(); //	Optional. Static.
+    } else if (path === `/${decodeURI(username)}` || path === `/@${decodeURI(username)}`) {
+      return username(); //	Mandatory. Static
+    } else if (path === '/following') {
+      return following(); //	Mandatory. Can be static or dynamic.
+    } else if (path === '/followers') {
+      return followers(); //	Mandatory. Can be static or dynamic.
+    } else if (path === '/inbox') {
+      return inbox(); //	Mandatory.
+    } else if (path === '/outbox') {
+      return outbox(); //	Optional. Dynamic.
+    } else if (path === '/action/send') {
+      return send(); //	API for posting content to the Fediverse.
+    } else if (path === '/action/follow') {
+      return follow(); // API for following other accounts
+    } else if (path === '/action/unfollow') {
+      return unfollow(); // API for unfollowing accounts
+    } else if (path === '/') {
+      return view('home'); // User interface for seeing what the user has posted.
+    } else {
+      return new Response('HTTP/1.1 404 Not Found');
+    }
+
+    // return new Response(`Your path is ${path}`);
+  },
+});
+
+console.log(`Server running at http://${serverHostName}:${server.port}`);
