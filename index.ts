@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 
 // Type the @ username that you want. Do not include an "@".
-const username = encodeURI(process.env.USERNAME!);
+const apUsername = encodeURIComponent(process.env.USERNAME!);
 
 // This is the user's "real" name.
 const realName = process.env.REALNAME!;
@@ -12,8 +12,8 @@ const summary = process.env.SUMMARY!;
 
 // Generate locally or from https://cryptotools.net/rsagen
 // Newlines must be replaced with "\n"
-const key_private = process.env.KEY_PRIVATE!.replace('\n', '\n');
-const key_public = process.env.KEY_PUBLIC!.replace('\n', '\n');
+const keyPrivate = process.env.KEY_PRIVATE!.replace('\n', '\n');
+const keyPublic = process.env.KEY_PUBLIC!.replace('\n', '\n');
 
 // Password for sending messages
 const password = process.env.PASSWORD!;
@@ -133,6 +133,65 @@ function nodeinfo() {
   });
 }
 
+//	User:
+//	Requesting `example.com/username` returns a JSON document with the user's information.
+function username(req: Request) {
+  // Check if HTML was requested
+  // If so, probably a browser - redirect to homepage
+  const headers = req.headers;
+  const accept = headers.get('Accept');
+  if (accept && accept.split(',')[0] === 'text/html') {
+    return new Response(null, {
+      status: 302,
+      headers: {
+        'Location': `https://${serverHostName}/`
+      }
+    });
+  }
+
+  const user = {
+    "@context": [
+      "https://www.w3.org/ns/activitystreams",
+      "https://w3id.org/security/v1"
+    ],
+    "id": `https://${serverHostName}/${apUsername}`,
+    "type": "Application", 
+    "following": `https://${serverHostName}/following`,
+    "followers": `https://${serverHostName}/followers`,
+    "inbox": `https://${serverHostName}/inbox`,
+    "outbox": `https://${serverHostName}/outbox`,
+    "preferredUsername": decodeURIComponent(apUsername),
+    "name": realName,
+    "summary": summary,
+    "url": `https://${serverHostName}/${apUsername}`,
+    "manuallyApprovesFollowers": false,
+    "discoverable": true,
+    "published": "2024-02-29T12:34:56Z",
+    "icon": {
+      "type": "Image",
+      "mediaType": "image/png", 
+      "url": `https://${serverHostName}/icon.png`
+    },
+    "image": {
+      "type": "Image",
+      "mediaType": "image/png",
+      "url": `https://${serverHostName}/banner.png`
+    },
+    "publicKey": {
+      "id": `https://${serverHostName}/${apUsername}#main-key`,
+      "owner": `https://${serverHostName}/${apUsername}`,
+      "publicKeyPem": keyPublic
+    }
+  };
+
+  return new Response(JSON.stringify(user), {
+    headers: {
+      'Content-Type': 'application/activity+json'
+    }
+  });
+}
+
+
 const server = Bun.serve({
   port: 3003,
   fetch(req, server) {
@@ -143,8 +202,8 @@ const server = Bun.serve({
       return wk_nodeinfo(); //	Optional. Static.
     } else if (path === '/nodeinfo/2.1') {
       return nodeinfo(); //	Optional. Static.
-    } else if (path === `/${decodeURI(username)}` || path === `/@${decodeURI(username)}`) {
-      return username(); //	Mandatory. Static
+    } else if (path === `/${decodeURIComponent(apUsername)}` || path === `/@${decodeURIComponent(apUsername)}`) {
+      return username(req); //	Mandatory. Static
     } else if (path === '/following') {
       return following(); //	Mandatory. Can be static or dynamic.
     } else if (path === '/followers') {
